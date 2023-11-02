@@ -1,11 +1,12 @@
 use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
+use tokio::time::sleep;
 use tokio::sync::mpsc;
 use tokio_stream::{wrappers::ReceiverStream, Stream, StreamExt};
-use tonic::transport::Server;
+use tonic::transport::{Certificate, Identity, Server, ServerTlsConfig};
 use tonic::{Request, Response, Status};
 
 use routeguide::route_guide_server::{RouteGuide, RouteGuideServer};
@@ -109,23 +110,34 @@ impl RouteGuide for RouteGuideService {
     ) -> Result<Response<Self::RouteChatStream>, Status> {
         println!("RouteChat");
 
-        let mut notes = HashMap::new();
-        let mut stream = request.into_inner();
+        // let mut notes = HashMap::new();
+        let mut _stream = request.into_inner();
 
         let output = async_stream::try_stream! {
-            while let Some(note) = stream.next().await {
-                let note = note?;
-
-                let location = note.location.clone().unwrap();
-
-                let location_notes = notes.entry(location).or_insert(vec![]);
-                location_notes.push(note);
-
-                for note in location_notes {
-                    yield note.clone();
-                }
+            loop {
+                sleep(Duration::from_secs(10)).await;
+                let note = RouteNote {
+                    location: Some(Point {
+                        latitude: 409146138,
+                        longitude: -746188906,
+                    }),
+                    message: "message".to_string(),
+                };
+                yield note;
             }
         };
+            // while let Some(note) = stream.next().await {
+            //     let note = note?;
+
+            //     let location = note.location.clone().unwrap();
+
+            //     let location_notes = notes.entry(location).or_insert(vec![]);
+            //     location_notes.push(note);
+
+            //     for note in location_notes {
+            //         yield note.clone();
+            //     }
+            // }
 
         Ok(Response::new(Box::pin(output) as Self::RouteChatStream))
     }
@@ -133,8 +145,20 @@ impl RouteGuide for RouteGuideService {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let addr = "[::1]:10000".parse().unwrap();
+    // let addr = "[::1]:10000".parse().unwrap();
 
+    // println!("RouteGuideServer listening on: {}", addr);
+
+    // let route_guide = RouteGuideService {
+    //     features: Arc::new(data::load()),
+    // };
+
+    // let svc = RouteGuideServer::new(route_guide);
+
+    // Server::builder().add_service(svc).serve(addr).await?;
+
+    // Ok(())
+    let addr = "0.0.0.0:8443".parse().unwrap();
     println!("RouteGuideServer listening on: {}", addr);
 
     let route_guide = RouteGuideService {
@@ -143,8 +167,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let svc = RouteGuideServer::new(route_guide);
 
-    Server::builder().add_service(svc).serve(addr).await?;
+    let data_dir = std::path::PathBuf::from_iter([std::env!("CARGO_MANIFEST_DIR"), "data"]);
+    let cert = std::fs::read_to_string(data_dir.join("/etc/ssl/grpc/server.crt"))?;
+    let key = std::fs::read_to_string(data_dir.join("/etc/ssl/grpc/server.key"))?;
+    let server_identity = Identity::from_pem(cert, key);
 
+    let tls = ServerTlsConfig::new()
+        .identity(server_identity);
+
+    Server::builder().tls_config(tls)?.add_service(svc).serve(addr).await?;
     Ok(())
 }
 

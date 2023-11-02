@@ -5,6 +5,7 @@ use rand::rngs::ThreadRng;
 use rand::Rng;
 use tokio::time;
 use tonic::transport::Channel;
+use tonic::transport::ClientTlsConfig;
 use tonic::Request;
 
 use routeguide::route_guide_client::RouteGuideClient;
@@ -62,28 +63,41 @@ async fn run_route_chat(client: &mut RouteGuideClient<Channel>) -> Result<(), Bo
     let start = time::Instant::now();
 
     let outbound = async_stream::stream! {
-        let mut interval = time::interval(Duration::from_secs(1));
+        let note = RouteNote {
+            location: Some(Point {
+                latitude: 409146138,
+                longitude: -746188906,
+            }),
+            message: "message".to_string(),
+        };
 
-        loop {
-            let time = interval.tick().await;
-            let elapsed = time.duration_since(start);
-            let note = RouteNote {
-                location: Some(Point {
-                    latitude: 409146138 + elapsed.as_secs() as i32,
-                    longitude: -746188906,
-                }),
-                message: format!("at {:?}", elapsed),
-            };
-
-            yield note;
-        }
+        yield note;
     };
+    // let outbound = async_stream::stream! {
+    //     let mut interval = time::interval(Duration::from_secs(1));
 
+    //     loop {
+    //         let time = interval.tick().await;
+    //         let elapsed = time.duration_since(start);
+    //         let note = RouteNote {
+    //             location: Some(Point {
+    //                 latitude: 409146138 + elapsed.as_secs() as i32,
+    //                 longitude: -746188906,
+    //             }),
+    //             message: format!("at {:?}", elapsed),
+    //         };
+
+    //         yield note;
+    //     }
+    // };
+
+    // let response = client.route_chat(Request::new(outbound)).await?;
     let response = client.route_chat(Request::new(outbound)).await?;
     let mut inbound = response.into_inner();
 
     while let Some(note) = inbound.message().await? {
-        println!("NOTE = {:?}", note);
+        let duration = time::Instant::now().duration_since(start);
+        println!("NOTE = {:?}, time since start: {}s", note, duration.as_secs());
     }
 
     Ok(())
@@ -91,22 +105,31 @@ async fn run_route_chat(client: &mut RouteGuideClient<Channel>) -> Result<(), Bo
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut client = RouteGuideClient::connect("http://[::1]:10000").await?;
+    let tls = ClientTlsConfig::new();
 
-    println!("*** SIMPLE RPC ***");
-    let response = client
-        .get_feature(Request::new(Point {
-            latitude: 409_146_138,
-            longitude: -746_188_906,
-        }))
+    let channel = Channel::from_static("https://balloonfauna.com:8443")
+        .tls_config(tls)?
+        .connect()
         .await?;
-    println!("RESPONSE = {:?}", response);
 
-    println!("\n*** SERVER STREAMING ***");
-    print_features(&mut client).await?;
+    let mut client = RouteGuideClient::new(channel);
 
-    println!("\n*** CLIENT STREAMING ***");
-    run_record_route(&mut client).await?;
+    // let mut client = RouteGuideClient::connect("http://[::1]:10000").await?;
+
+    // println!("*** SIMPLE RPC ***");
+    // let response = client
+    //     .get_feature(Request::new(Point {
+    //         latitude: 409_146_138,
+    //         longitude: -746_188_906,
+    //     }))
+    //     .await?;
+    // println!("RESPONSE = {:?}", response);
+
+    // println!("\n*** SERVER STREAMING ***");
+    // print_features(&mut client).await?;
+
+    // println!("\n*** CLIENT STREAMING ***");
+    // run_record_route(&mut client).await?;
 
     println!("\n*** BIDIRECTIONAL STREAMING ***");
     run_route_chat(&mut client).await?;
